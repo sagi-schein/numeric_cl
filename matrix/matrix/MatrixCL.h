@@ -1,18 +1,21 @@
 #pragma once
+#define CL_TARGET_OPENCL_VERSION 120
+#define __CL_ENABLE_EXCEPTIONS
 #include<CL/cl.h>
 #include<memory>
 #include<vector>
-class MatrixCL
+#include "ClBase.h"
+
+class MatrixCL: public ClBase
 {
 	cl_context _ctx;
 	cl_command_queue _queue;
-	cl_program _program;
 	cl_mem _matrix_data;
-	int _ncols,_nrows;
+	unsigned int _ncols,_nrows;
 	
 public:
 	MatrixCL();
-	MatrixCL(cl_context ctx,cl_command_queue queue, cl_program program,int nrows,int ncols,float * data=nullptr);
+	MatrixCL(cl_context ctx,cl_command_queue queue, unsigned int nrows,unsigned int ncols,float * data=nullptr);
 	~MatrixCL(void);
 	MatrixCL(const MatrixCL & that);
 	MatrixCL(MatrixCL && that);//move ctor

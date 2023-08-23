@@ -1,6 +1,8 @@
 #include "MatrixCL.h"
 #include <iostream>
 #include <string>
+#include <stdexcept>
+
 
 MatrixCL::MatrixCL():_ncols(0),_nrows(0),_matrix_data(nullptr),_ctx(nullptr),_queue(nullptr)
 {
@@ -10,13 +12,13 @@ MatrixCL::MatrixCL():_ncols(0),_nrows(0),_matrix_data(nullptr),_ctx(nullptr),_qu
 	
 }
 
-MatrixCL::MatrixCL(cl_context ctx,cl_command_queue queue,cl_program program,int nrows,int ncols,float * data): 
-	_ctx(ctx),_queue(queue),_program(program),_ncols(ncols),_nrows(nrows),_matrix_data(nullptr)
+MatrixCL::MatrixCL(cl_context ctx,cl_command_queue queue,unsigned int nrows,unsigned int ncols,float * data): 
+	_ctx(ctx),_queue(queue),_ncols(ncols),_nrows(nrows),_matrix_data(nullptr)
 {
 	cl_int err;
-	_matrix_data = clCreateBuffer(_ctx, data != nullptr ? CL_MEM_COPY_HOST_PTR : NULL, sizeof(float)*_nrows*_ncols,data, &err);
+	_matrix_data = clCreateBuffer(_ctx, data != nullptr ? CL_MEM_COPY_HOST_PTR : CL_MEM_READ_WRITE, sizeof(float)*_nrows*_ncols,data, &err);
 	if(err != CL_SUCCESS){
-		throw std::exception(("failed to create matrix in clCreateBuffer : "+std::to_string(err)).c_str());
+		throw std::runtime_error(("failed to create matrix in clCreateBuffer : "+std::to_string(err)).c_str());
 	}
 
 }
@@ -27,9 +29,9 @@ MatrixCL::~MatrixCL(void)
 	
 	if(_matrix_data != nullptr){
 		cl_int res = clReleaseMemObject(_matrix_data);//remember that this will remove a refernce 
-		if(res != CL_SUCCESS){
-			throw std::exception(("failed to release matrix in clReleaseMemObject : "+std::to_string(res)).c_str());
-		}
+		/*if(res != CL_SUCCESS){
+			throw std::runtime_error(("failed to release matrix in clReleaseMemObject : "+std::to_string(res)).c_str());
+		} c++ 11 default is not to propagate exceptions - need to think of a solution*/
 	}
 }
 
@@ -70,17 +72,18 @@ const MatrixCL& MatrixCL::operator=(const MatrixCL & that)
 	_ncols = that._ncols;
 
 	cl_int err;
-	_matrix_data = clCreateBuffer(_ctx, NULL, sizeof(float)*_nrows*_ncols,nullptr, &err);
+	cl_event event;
+	_matrix_data = clCreateBuffer(_ctx, CL_MEM_READ_WRITE, sizeof(float)*_nrows*_ncols,nullptr, &err);
 	if(err != CL_SUCCESS){
-		throw std::exception(("failed to create matrix in clCreateBuffer : "+std::to_string(err)).c_str());
+		throw std::runtime_error(("failed to create matrix in clCreateBuffer : "+std::to_string(err)).c_str());
 	}
-	err = clEnqueueCopyBuffer(_queue,that._matrix_data,_matrix_data,0,0,sizeof(float)*_nrows*_ncols,0,nullptr,nullptr);
+	err = clEnqueueCopyBuffer(_queue,that._matrix_data,_matrix_data,0,0,sizeof(float)*_nrows*_ncols,0,nullptr,&event);
 	if(err != CL_SUCCESS){
-		throw std::exception(("failed to copy matrix in clEnqueueCopyBuffer : "+std::to_string(err)).c_str());
+		throw std::runtime_error(("failed to copy matrix in clEnqueueCopyBuffer : "+std::to_string(err)).c_str());
 	}
-	err = clEnqueueBarrier(_queue); 
+	err = clWaitForEvents(1,&event); 
 	if(err != CL_SUCCESS){
-		throw std::exception(("failed to wait for operation in clEnqueueBarrier : "+std::to_string(err)).c_str());
+		throw std::runtime_error(("failed to wait for operation in clWaitForEvents : "+std::to_string(err)).c_str());
 	}
 	return *this;
 }
@@ -91,11 +94,13 @@ std::pair<int,int> MatrixCL::dim()const
 }
 
 
- MatrixCL MatrixCL::operator+(const MatrixCL& right)const
+ MatrixCL MatrixCL::operator+(const MatrixCL& right) const
 {
-	MatrixCL res(_ctx,_queue,_program,_nrows,_ncols,nullptr);
+	auto kernel_name = std::string("add");
+	cl_program program = getProgram(kernel_name);
+	MatrixCL res(_ctx,_queue,_nrows,_ncols,nullptr);
 	cl_int err;
-	cl_kernel add = clCreateKernel(_program,"add", NULL);
+	cl_kernel add = clCreateKernel(program,"add", NULL);
 	err = clSetKernelArg(add, 0, sizeof(cl_mem), (void *)&_matrix_data);
 	err = clSetKernelArg(add, 1, sizeof(cl_mem), (void *)&right._matrix_data);
 	err = clSetKernelArg(add, 2, sizeof(cl_mem), (void *)&res._matrix_data);
@@ -114,7 +119,7 @@ MatrixCL MatrixCL::operator-(const MatrixCL& right)const
 MatrixCL MatrixCL::operator*(const MatrixCL& right)const
 {
 	if(_ncols != right._nrows){
-		throw std::exception(("matrix dim mismatch : _ncols != right._nrows ("+std::to_string(_ncols)+","+std::to_string(right._nrows)+")").c_str());
+		throw std::runtime_error(("matrix dim mismatch : _ncols != right._nrows ("+std::to_string(_ncols)+","+std::to_string(right._nrows)+")").c_str());
 	}
 	MatrixCL res(_ctx,_queue,_program,_nrows,right._ncols,nullptr);
 	cl_int err;
